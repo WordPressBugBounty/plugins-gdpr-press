@@ -1,0 +1,85 @@
+<?php
+/**
+ * @package   GDPRess
+ * @author    Daan van den Bergh
+ *            https://daan.dev
+ */
+
+namespace GDPRess;
+
+use GDPRess\Admin\Ajax;
+use GDPRess\Admin\CacheManager;
+use GDPRess\Admin\Settings\Help;
+use GDPRess\Admin\Settings\Manage;
+use GDPRess\Admin\Notice;
+
+class Admin {
+	
+	/**
+	 * Set fields.
+	 *
+	 * @return void
+	 */
+	public function __construct() {
+		$this->init();
+	}
+	
+	/**
+	 * Hooks and Filters
+	 *
+	 * @return void
+	 */
+	private function init() {
+		add_action( 'admin_init', [ $this, 'update_cache' ] );
+		add_action( 'admin_notices', [ $this, 'print_notices' ] );
+		
+		$this->add_ajax_hooks();
+		$this->build_manage_section();
+		$this->build_help_section();
+	}
+	
+	/**
+	 * Add AJAX hooks.
+	 *
+	 * @return void
+	 */
+	private function add_ajax_hooks() {
+		new Ajax();
+	}
+	
+	/**
+	 * Build Manage section contents.
+	 *
+	 * @return void
+	 */
+	private function build_manage_section() {
+		new Manage();
+	}
+	
+	/**
+	 * Load Help section contents.
+	 *
+	 * @return void
+	 */
+	private function build_help_section() {
+		new Help();
+	}
+	
+	/**
+	 * Print onscreen notices, if any.
+	 *
+	 * @return void
+	 */
+	public function print_notices() {
+		Notice::print_notices();
+	}
+	
+	/**
+	 * File Downloader
+	 *
+	 * @return void
+	 */
+	public function update_cache() {
+		new CacheManager();
+	}
+}
