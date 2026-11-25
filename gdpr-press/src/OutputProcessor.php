@@ -130,15 +130,13 @@ class OutputProcessor {
 	 * @return array
 	 */
 	private function get_external_requests( $html ) {
-		$site_url = get_home_url();
-		
 		preg_match_all( '/<link.*?stylesheet.*?[\/]?>/', $html, $stylesheets );
 		
-		$stylesheets = $this->parse_stylesheets( $stylesheets[0] ?? [], $site_url );
+		$stylesheets = $this->parse_stylesheets( $stylesheets[0] ?? [] );
 		
 		preg_match_all( '/<script.*?src.*?<\/script>/', $html, $scripts );
 		
-		$scripts = $this->parse_scripts( $scripts[0] ?? [], $site_url );
+		$scripts = $this->parse_scripts( $scripts[0] ?? [] );
 		
 		$external_reqs = [];
 		
@@ -158,26 +156,21 @@ class OutputProcessor {
 	 *
 	 * @since v1.2.0
 	 *
-	 * @param array  $stylesheets
-	 * @param string $site_url
+	 * @param array $stylesheets
 	 *
 	 * @return array { int => { 'name' => string, 'href' => string } }
 	 */
-	private function parse_stylesheets( $stylesheets, $site_url ) {
+	private function parse_stylesheets( $stylesheets ) {
 		$external_css = [];
 		$i            = 0;
 		
 		foreach ( $stylesheets as $stylesheet ) {
 			preg_match( '/href=[\'"](?P<href>.*?)[\'"]/', $stylesheet, $href );
 			
-			$href = $fixed_href = $href['href'] ?? '';
-			
-			if ( str_starts_with( $href, '//' ) ) {
-				$fixed_href = 'https:' . $href;
-			}
+			$href = $href['href'] ?? '';
 			
 			// If the resource is already locally loaded, it's an inline style block, or it's a non-external URI scheme, move along.
-			if ( ! $href || str_starts_with( $fixed_href, '/' ) || str_contains( $fixed_href, $site_url ) || preg_match( '/^(data:|blob:|javascript:|about:|#)/', $href ) ) {
+			if ( ! $href || Helper::is_local_request( $href ) || preg_match( '/^(data:|blob:|javascript:|about:|#)/', $href ) ) {
 				continue;
 			}
 			
@@ -283,12 +276,11 @@ class OutputProcessor {
 	 *
 	 * @since v1.2.0
 	 *
-	 * @param array  $scripts
-	 * @param string $site_url
+	 * @param array $scripts
 	 *
 	 * @return array { int => { 'name' => string, 'href' => string } }
 	 */
-	private function parse_scripts( $scripts, $site_url ) {
+	private function parse_scripts( $scripts ) {
 		$external_js = [];
 		$i           = 0;
 		
@@ -298,7 +290,7 @@ class OutputProcessor {
 			$src = $src['src'] ?? '';
 			
 			// If the resource is already locally loaded, it's an inline style block, or it's a non-external URI scheme, move along.
-			if ( str_contains( $src, $site_url ) || ! $src || preg_match( '/^(data:|blob:|javascript:|about:|#)/', $src ) ) {
+			if ( ! $src || Helper::is_local_request( $src ) || preg_match( '/^(data:|blob:|javascript:|about:|#)/', $src ) ) {
 				continue;
 			}
 			
@@ -332,6 +324,7 @@ class OutputProcessor {
 	 */
 	private function update_managed_requests( $external_reqs ) {
 		$existing_requests = Helper::requests();
+		$merged            = $existing_requests;
 		$has_new_items     = false;
 		
 		foreach ( [ 'css', 'js' ] as $type ) {
@@ -339,29 +332,18 @@ class OutputProcessor {
 				continue;
 			}
 			
-			$existing_hrefs = array_column( $existing_requests[ $type ] ?? [], 'href' );
+			$existing_ids = array_map( [ Helper::class, 'get_request_id' ], array_column( $existing_requests[ $type ] ?? [], 'href' ) );
+			$new_items    = array_filter( $external_reqs[ $type ], fn( $item ) => ! in_array( Helper::get_request_id( $item['href'] ), $existing_ids, true ) );
 			
-			foreach ( $external_reqs[ $type ] as $item ) {
-				if ( ! in_array( $item['href'], $existing_hrefs ) ) {
-					$has_new_items = true;
-					break 2;
-				}
+			if ( ! $new_items ) {
+				continue;
 			}
+			
+			$has_new_items   = true;
+			$merged[ $type ] = array_merge( $merged[ $type ] ?? [], Helper::unique_requests( $new_items ) );
 		}
 		
 		if ( $has_new_items ) {
-			$merged = $existing_requests;
-			
-			foreach ( [ 'css', 'js' ] as $type ) {
-				if ( empty( $external_reqs[ $type ] ) ) {
-					continue;
-				}
-				
-				$existing_hrefs  = array_column( $merged[ $type ] ?? [], 'href' );
-				$new_items       = array_filter( $external_reqs[ $type ], fn( $item ) => ! in_array( $item['href'], $existing_hrefs ) );
-				$merged[ $type ] = array_merge( $merged[ $type ] ?? [], array_values( $new_items ) );
-			}
-			
 			update_option( Settings::GDPRESS_MANAGE_SETTING_REQUESTS, $merged );
 		}
 	}
@@ -379,8 +361,7 @@ class OutputProcessor {
 	 * @throws \SodiumException
 	 */
 	private function process_requests( $requests, $html ) {
-		$download  = new Download();
-		$added_new = false;
+		$download = new Download();
 		
 		foreach ( $requests as $type => $type_requests ) {
 			foreach ( $type_requests as $request ) {
@@ -399,23 +380,38 @@ class OutputProcessor {
 				/**
 				 * If it doesn't exist, download it.
 				 */
-				if ( ! file_exists( $local_dir ) ) {
-					$download->download_file( $request['name'], $type, $request['href'] );
+				if ( ! is_file( $local_dir ) ) {
+					$local_url = $download->download_file( $request['name'], $type, $request['href'] );
 					
-					Helper::set_local_url( $type, $request['href'] );
-					
-					$added_new = true;
+					// Download failed, so leave the external URL in place.
+					if ( ! $local_url ) {
+						continue;
+					}
 				}
 				
-				$html = str_replace( $request['href'], esc_attr( $local_url ), $html );
+				$html = str_replace( $request['href'], esc_attr( $local_url ) . $this->get_query( $request['href'] ), $html );
 			}
 		}
 		
-		if ( $added_new ) {
-			Helper::set_local_url( '', '', true );
+		return $html;
+	}
+	
+	/**
+	 * Get the query string (including the question mark) as it's used in the HTML, because some scripts read the
+	 * parameters from their own URL.
+	 *
+	 * @since v1.3.2
+	 *
+	 * @param string $url
+	 *
+	 * @return string
+	 */
+	private function get_query( $url ) {
+		if ( Helper::is_google_fonts_request( $url ) ) {
+			return '';
 		}
 		
-		return $html;
+		return strstr( $url, '?' ) ?: '';
 	}
 	
 	/**

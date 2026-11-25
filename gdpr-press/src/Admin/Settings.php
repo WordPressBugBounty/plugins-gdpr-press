@@ -27,13 +27,16 @@ class Settings extends Admin {
     const GDPRESS_TRANSIENT_NEWS_REEL = 'gdpress_news_reel';
 
     /**
+     * Options
+     */
+    const GDPRESS_OPTION_DB_VERSION = 'gdpress_db_version';
+
+    /**
      * Settings
      */
     const GDPRESS_MANAGE_SETTING_TEST_MODE = 'gdpress_test_mode';
 
     const GDPRESS_MANAGE_SETTING_REQUESTS = 'gdpress_external_requests';
-
-    const GDPRESS_MANAGE_SETTING_LOCAL = 'gdpress_local_urls';
 
     const GDPRESS_MANAGE_SETTING_EXCLUDED = 'gdpress_excluded_urls';
 

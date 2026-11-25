@@ -7,6 +7,7 @@
 
 namespace GDPRess;
 
+use GDPRess\Admin\Migrate;
 use GDPRess\Admin\Settings;
 
 class Plugin {
@@ -28,6 +29,7 @@ class Plugin {
 	private function init() {
 		new Constants();
 		new Setup();
+		new Migrate();
 		
 		if ( is_admin() ) {
 			new Settings();
